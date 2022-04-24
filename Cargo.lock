@@ -410,6 +410,7 @@ dependencies = [
 name = "prometheus-http-api-rs"
 version = "0.1.0"
 dependencies = [
+ "http",
  "hyper",
  "hyper-tls",
  "percent-encoding",
