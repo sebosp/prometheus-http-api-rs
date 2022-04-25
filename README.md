@@ -2,7 +2,7 @@
 
 A simple library to pull data from prometheus using its API
 
-[![CI](https://github.com/sebosp/prometheus-http-api-rs/workflows/CI/badge.svg)](https://github.com/sebosp/prometheus-http-api-rs/actions?query=workflow%3ACI)
+[![Rust](https://github.com/sebosp/prometheus-http-api-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/sebosp/prometheus-http-api-rs/actions/workflows/rust.yml)
 [![Crates.io](https://img.shields.io/crates/v/prometheus-http-api-rs.svg)](https://crates.io/crates/prometheus-http-api-rs)
 [![Documentation](https://docs.rs/prometheus-http-api-rs/badge.svg)][dox]
 
