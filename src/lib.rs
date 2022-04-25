@@ -21,8 +21,6 @@
 //! }
 
 #![warn(rust_2018_idioms)]
-#[macro_use]
-extern crate serde_derive;
 use hyper::client::connect::HttpConnector;
 use hyper::client::Client;
 use hyper_tls::HttpsConnector;
@@ -111,16 +109,26 @@ impl PrometheusInstantQuery {
         self
     }
 
-    /// Transforms the typed query into HTTP GET query params
-    pub fn as_query_params(&self) -> String {
-        let mut res = String::from(format!("query={}", self.query));
+    /// Transforms the typed query into HTTP GET query params, it contains a pre-built `base` that
+    /// may use an HTTP path  prefix if configured.
+    pub fn as_query_params(&self, mut base: String) -> String {
+        tracing::trace!(
+            "PrometheusInstantQuery::as_query_params raw query: {}",
+            self.query
+        );
+        let encoded_query = utf8_percent_encode(&self.query, NON_ALPHANUMERIC).to_string();
+        tracing::trace!(
+            "PrometheusInstantQuery::as_query_params encoded_query: {}",
+            encoded_query
+        );
+        base.push_str(&format!("api/v1/query?query={}", encoded_query));
         if let Some(time) = self.time {
-            res.push_str(&format!("&time={}", time));
+            base.push_str(&format!("&time={}", time));
         }
         if let Some(timeout) = self.timeout {
-            res.push_str(&format!("&timeout={}", timeout));
+            base.push_str(&format!("&timeout={}", timeout));
         }
-        res
+        base
     }
 }
 
@@ -156,16 +164,26 @@ impl PrometheusRangeQuery {
         self
     }
 
-    /// Transforms the typed query into HTTP GET query params
-    pub fn as_query_params(&self) -> String {
-        let mut res = String::from(format!(
-            "query={}&start={}&end={}&step={}",
-            self.query, self.start, self.end, self.step
+    /// Transforms the typed query into HTTP GET query params, it contains a pre-built `base` that
+    /// may use an HTTP path  prefix if configured.
+    pub fn as_query_params(&self, mut base: String) -> String {
+        tracing::trace!(
+            "PrometheusRangeQuery::as_query_params: raw query: {}",
+            self.query
+        );
+        let encoded_query = utf8_percent_encode(&self.query, NON_ALPHANUMERIC).to_string();
+        tracing::trace!(
+            "PrometheusRangeQuery::as_query_params encoded_query: {}",
+            encoded_query
+        );
+        base.push_str(&format!(
+            "api/v1/query_range?query={}&start={}&end={}&step={}",
+            encoded_query, self.start, self.end, self.step
         ));
         if let Some(timeout) = self.timeout {
-            res.push_str(&format!("&timeout={}", timeout));
+            base.push_str(&format!("&timeout={}", timeout));
         }
-        res
+        base
     }
 }
 
@@ -189,10 +207,18 @@ impl PrometheusQuery {
     }
 
     /// Transforms the typed query into HTTP GET query params
-    pub fn as_query_params(&self) -> String {
+    pub fn as_query_params(&self, prefix: Option<String>) -> String {
+        let mut base = if let Some(prefix) = prefix {
+            prefix
+        } else {
+            String::from("/")
+        };
+        if !base.ends_with("/") {
+            base.push_str("/");
+        }
         match self {
-            Self::Instant(query) => query.as_query_params(),
-            Self::Range(query) => query.as_query_params(),
+            Self::Instant(query) => query.as_query_params(base),
+            Self::Range(query) => query.as_query_params(base),
         }
     }
 
@@ -321,22 +347,13 @@ impl PrometheusDataSourceBuilder {
 }
 
 impl PrometheusDataSource {
-    /// `prepare_url` builds a hyper::Uri with the query and time boundaries
-    pub fn build_url(&self) -> Result<hyper::Uri, PrometheusDataSourceError> {
-        tracing::trace!("build_url()");
-        let url_builder = http::uri::Builder::new()
-            .scheme(self.scheme.as_str())
-            .authority(self.authority.clone());
-        let query_params = self.query.as_query_params();
-        tracing::trace!("build_url: raw query_params: {}", query_params);
-        let encoded_query_params = utf8_percent_encode(&query_params, NON_ALPHANUMERIC).to_string();
-        tracing::trace!("build_url: encoded query_params: {}", encoded_query_params);
-        Ok(url_builder.path_and_query(encoded_query_params).build()?)
-    }
-
     /// `get` is an async operation that returns potentially a PrometheusResponse
     pub async fn get(&self) -> Result<PrometheusResponse, PrometheusDataSourceError> {
-        let url = self.build_url()?;
+        let url = http::uri::Builder::new()
+            .authority(self.authority.clone())
+            .scheme(self.scheme.as_str())
+            .path_and_query(self.query.as_query_params(self.prefix.clone()))
+            .build()?;
         tracing::debug!("get() init Prometheus URL: {}", url);
         let mut client = Client::builder();
         if let Some(timeout) = self.http_timeout {
@@ -480,6 +497,7 @@ mod tests {
             serde_json::from_slice(&test2_json);
         assert_eq!(res_json.is_ok(), true);
     }
+
     #[test]
     fn it_loads_prometheus_vector() {
         init_log();
@@ -520,5 +538,17 @@ mod tests {
         let res_json: Result<PrometheusResponse, serde_json::Error> =
             serde_json::from_slice(&test0_json);
         assert_eq!(res_json.is_ok(), true);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn it_loads_prometheus() {
+        let query = PrometheusQuery::Instant(PrometheusInstantQuery::new("up".to_string()));
+        let request = PrometheusDataSourceBuilder::new("localhost:9090".to_string())
+            .with_query(query)
+            .build()
+            .unwrap();
+        let res_json = request.get().await;
+        tracing::error!("{:?}", res_json);
     }
 }
