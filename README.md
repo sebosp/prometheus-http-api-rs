@@ -1,4 +1,4 @@
-# prometheus-http-api-rs
+# prometheus-http-api-rs 0.0.1
 
 A simple library to pull data from prometheus using its API
 
@@ -16,7 +16,7 @@ Add dependency in `Cargo.toml`:
 
 ```toml
 [dependencies]
-prometheus-http-api-rs = "0.1"
+prometheus-http-api-rs = "0.0.1"
 ```
 
 Use `prometheus_http_api_rs`
