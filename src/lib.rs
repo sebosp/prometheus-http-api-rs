@@ -359,7 +359,166 @@ impl PrometheusDataSource {
                 return Err(err.into());
             }
         };
-        tracing::debug!("get() done Prometheus URL: {}. Deserializing.", url);
+        tracing::debug!("get() done");
+        tracing::trace!("Deserializing: {:?}", response_body);
         Ok(serde_json::from_slice(&response_body)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn init_log() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    #[test]
+    fn it_detects_prometheus_errors() {
+        init_log();
+        let test0_json = hyper::body::Bytes::from(
+            r#"
+            {
+              "status": "error",
+              "errorType": "bad_data",
+              "error": "end timestamp must not be before start time"
+            }
+            "#,
+        );
+        let res0_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test0_json);
+        assert_eq!(res0_json.is_err(), true);
+        let test1_json = hyper::body::Bytes::from("Internal Server Error");
+        let res1_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test1_json);
+        assert_eq!(res1_json.is_err(), true);
+    }
+
+    #[test]
+    fn it_loads_prometheus_scalars() {
+        init_log();
+        // A json returned by prometheus
+        let test0_json = hyper::body::Bytes::from(
+            r#"
+            { "status":"success",
+              "data":{
+                "resultType":"scalar",
+                "result":[1558283674.829,"1"]
+              }
+            }"#,
+        );
+        let res_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test0_json);
+        assert_eq!(res_json.is_ok(), true);
+        // This json is missing the value after the epoch
+        let test1_json = hyper::body::Bytes::from(
+            r#"
+            { "status":"success",
+              "data":{
+                "resultType":"scalar",
+                "result":[1558283674.829]
+              }
+            }"#,
+        );
+        let res_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test1_json);
+        assert_eq!(res_json.is_ok(), true);
+    }
+
+    #[test]
+    fn it_loads_prometheus_matrix() {
+        init_log();
+        // A json returned by prometheus
+        let test0_json = hyper::body::Bytes::from(
+            r#"
+            {
+              "status": "success",
+              "data": {
+                "resultType": "matrix",
+                "result": [
+                  {
+                    "metric": {
+                      "__name__": "node_load1",
+                      "instance": "localhost:9100",
+                      "job": "node_exporter"
+                    },
+                    "values": [
+                        [1558253469,"1.69"],[1558253470,"1.70"],[1558253471,"1.71"],
+                        [1558253472,"1.72"],[1558253473,"1.73"],[1558253474,"1.74"],
+                        [1558253475,"1.75"],[1558253476,"1.76"],[1558253477,"1.77"],
+                        [1558253478,"1.78"],[1558253479,"1.79"]]
+                  }
+                ]
+              }
+            }"#,
+        );
+        let res_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test0_json);
+        assert_eq!(res_json.is_ok(), true);
+        // This json is missing the value after the epoch
+        let test2_json = hyper::body::Bytes::from(
+            r#"
+            {
+              "status": "success",
+              "data": {
+                "resultType": "matrix",
+                "result": [
+                  {
+                    "metric": {
+                      "__name__": "node_load1",
+                      "instance": "localhost:9100",
+                      "job": "node_exporter"
+                    },
+                    "values": [
+                        [1558253478]
+                    ]
+                  }
+                ]
+              }
+            }"#,
+        );
+        let res_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test2_json);
+        assert_eq!(res_json.is_ok(), true);
+    }
+    #[test]
+    fn it_loads_prometheus_vector() {
+        init_log();
+        // A json returned by prometheus
+        let test0_json = hyper::body::Bytes::from(
+            r#"
+            {
+              "status": "success",
+              "data": {
+                "resultType": "vector",
+                "result": [
+                  {
+                    "metric": {
+                      "__name__": "up",
+                      "instance": "localhost:9090",
+                      "job": "prometheus"
+                    },
+                    "value": [
+                      1557571137.732,
+                      "1"
+                    ]
+                  },
+                  {
+                    "metric": {
+                      "__name__": "up",
+                      "instance": "localhost:9100",
+                      "job": "node_exporter"
+                    },
+                    "value": [
+                      1557571138.732,
+                      "1"
+                    ]
+                  }
+                ]
+              }
+            }"#,
+        );
+        let res_json: Result<PrometheusResponse, serde_json::Error> =
+            serde_json::from_slice(&test0_json);
+        assert_eq!(res_json.is_ok(), true);
     }
 }

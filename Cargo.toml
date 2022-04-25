@@ -16,3 +16,8 @@ percent-encoding = "2.1"
 thiserror = "1.0"
 tracing = "0.1.22"
 tracing-subscriber = "0.3"
+
+[dev-dependencies]
+env_logger = "0.9"
+tracing = { version = "0.1", features = ["log", "log-always"] }
+tracing-log = { version = "0.1", features = ["env_logger"]}
