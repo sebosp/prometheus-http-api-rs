@@ -1,8 +1,14 @@
 [package]
 name = "prometheus-http-api-rs"
+description = "API to interact with Prometheus HTTP API"
 version = "0.1.0"
 authors = ["Seb Ospina <kraige@gmail.com>"]
 edition = "2021"
+readme = "README.md"
+repository = "https://github.com/sebosp/prometheus-http-api-rs"
+license = "Apache License, Version 2.0"
+keywords = ["prometheus"]
+categories = ["web-programming::http-client"]
 
 [dependencies]
 serde_derive = "1"
