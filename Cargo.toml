@@ -1,7 +1,7 @@
 [package]
-name = "prometheus-http-api-rs"
+name = "prometheus-http-api"
 description = "API to interact with Prometheus HTTP API"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Seb Ospina <kraige@gmail.com>"]
 edition = "2021"
 readme = "README.md"
