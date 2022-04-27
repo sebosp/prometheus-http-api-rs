@@ -1,26 +1,37 @@
-//! `Prometheus HTTP API` data structures
-//! The data structures parse structures like:
-//!  {
-//!   "data": {
-//!     "result": [
-//!       {
-//!         "metric": {
-//!           "__name__": "up",
-//!           "instance": "localhost:9090",
-//!           "job": "prometheus"
-//!         },
-//!         "value": [
-//!           1557052757.816,
-//!           "1"
-//!         ]
-//!       },{...}
-//!     ],
-//!     "resultType": "vector"
-//!   },
-//!   "status": "success"
+//! Prometheus HTTP API
+//!
+//! This crate provides data structures to interact with the prometheus HTTP API endpoints. The
+//! crate allows constructing prometheus data sources with [`DataSourceBuilder`].
+//!
+//! A [`Query`] must be provided to the prometheus data source via the
+//! [`DataSourceBuilder::with_query()`] that acceps either a
+//! [`InstantQuery`] or a [`RangeQuery`], for these types, build-like methods
+//! are provided for the optional parameters.
+//!
+//! ## Simple Usage
+//!
+//! To gather the data from `<http://localhost:9090/api/v1/query?query=up>`
+//!
+//! ```
+//! use prometheus_http_api::{
+//!     DataSourceBuilder, InstantQuery, Query,
+//! };
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let query = Query::Instant(InstantQuery::new("up"));
+//!     let request = DataSourceBuilder::new("localhost:9090")
+//!         .with_query(query)
+//!         .build()
+//!         .unwrap();
+//!     let res_json = request.get().await;
+//!     tracing::info!("{:?}", res_json);
 //! }
+//! ```
 
 #![warn(rust_2018_idioms)]
+#![warn(missing_docs)]
+#![warn(rustdoc::missing_doc_code_examples)]
 use hyper::client::connect::HttpConnector;
 use hyper::client::Client;
 use hyper_tls::HttpsConnector;
@@ -30,56 +41,132 @@ use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 
-/// `PrometheusMatrixResult` contains Range Vectors, data is stored like this
-/// [[Epoch1, Metric1], [Epoch2, Metric2], ...]
+/// [`MatrixResult`] contains Prometheus Range Vectors
+/// ```
+/// let matrix_raw_response = hyper::body::Bytes::from(r#"
+///   {
+///     "metric": {
+///       "__name__": "node_load1",
+///       "instance": "localhost:9100",
+///       "job": "node_exporter"
+///     },
+///     "values": [
+///       [1558253469,"1.69"],[1558253470,"1.70"],[1558253471,"1.71"]
+///     ]
+///   }"#);
+/// let res_json: Result<prometheus_http_api::MatrixResult, serde_json::Error> = serde_json::from_slice(&matrix_raw_response);
+/// assert!(res_json.is_ok());
+/// ```
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
-pub struct PrometheusMatrixResult {
+pub struct MatrixResult {
+    /// A series of labels for the matrix results. This is a HashMap of `{"label_name_1":
+    /// "value_1", ...}`
     #[serde(rename = "metric")]
     pub labels: HashMap<String, String>,
+    /// The values over time captured on prometheus, generally `[[<epoch>, "<value>"]]`
     pub values: Vec<Vec<serde_json::Value>>,
 }
 
-/// `PrometheusVectorResult` contains Instant Vectors, data is stored like this
-/// [Epoch1, Metric1, Epoch2, Metric2, ...]
+/// `VectorResult` contains Prometheus Instant Vectors
+/// ```
+/// let vector_raw_response = hyper::body::Bytes::from(r#"
+///  {
+///    "metric": {
+///      "__name__": "up",
+///      "instance": "localhost:9090",
+///      "job": "prometheus"
+///    },
+///    "value": [
+///      1557571137.732,
+///      "1"
+///    ]
+///   }"#);
+/// let res_json: Result<prometheus_http_api::VectorResult, serde_json::Error> = serde_json::from_slice(&vector_raw_response);
+/// assert!(res_json.is_ok());
+/// ```
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
-pub struct PrometheusVectorResult {
+pub struct VectorResult {
+    /// A series of labels for the matrix results. This is a HashMap of `{"label_name_1":
+    /// "value_1", ...}`
     #[serde(rename = "metric")]
     pub labels: HashMap<String, String>,
+    /// The values over time captured on prometheus, generally `[[<epoch>, "<value>"]]`
     pub value: Vec<serde_json::Value>,
 }
 
-/// `PrometheusResponseData` may be one of these types:
-/// https://prometheus.io/docs/prometheus/latest/querying/api/#expression-query-result-formats
+/// Available [`ResponseData`] formats documentation:
+/// `https://prometheus.io/docs/prometheus/latest/querying/api/#expression-query-result-formats`
+/// ```
+/// let scalar_result_type = hyper::body::Bytes::from(r#"{
+///   "resultType":"scalar",
+///   "result":[1558283674.829,"1"]
+///  }"#);
+/// let res_json: Result<prometheus_http_api::ResponseData, serde_json::Error> = serde_json::from_slice(&scalar_result_type);
+/// assert!(res_json.is_ok());
+/// ```
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(tag = "resultType")]
-pub enum PrometheusResponseData {
+pub enum ResponseData {
+    /// Handles a Response of type [`VectorResult`]
     #[serde(rename = "vector")]
-    Vector { result: Vec<PrometheusVectorResult> },
+    Vector {
+        /// The result vector.
+        result: Vec<VectorResult>,
+    },
+    /// Handles a Response of type [`MatrixResult`]
     #[serde(rename = "matrix")]
-    Matrix { result: Vec<PrometheusMatrixResult> },
+    Matrix {
+        /// The result vector.
+        result: Vec<MatrixResult>,
+    },
+    /// Handles a scalar result, generally numeric
     #[serde(rename = "scalar")]
-    Scalar { result: Vec<serde_json::Value> },
+    Scalar {
+        /// The result vector.
+        result: Vec<serde_json::Value>,
+    },
+    /// Handles a String result, for example for label names
     #[serde(rename = "string")]
-    String { result: Vec<serde_json::Value> },
+    String {
+        /// The result vector.
+        result: Vec<serde_json::Value>,
+    },
 }
 
-impl Default for PrometheusResponseData {
+impl Default for ResponseData {
     fn default() -> Self {
         Self::Vector {
-            result: vec![PrometheusVectorResult::default()],
+            result: vec![VectorResult::default()],
         }
     }
 }
 
+/// A Prometheus [`Response`] returned by an HTTP query.
+/// ```
+/// let full_response = hyper::body::Bytes::from(
+///    r#"
+///    { "status":"success",
+///      "data":{
+///        "resultType":"scalar",
+///        "result":[1558283674.829,"1"]
+///      }
+///    }"#,
+///  );
+/// let res_json: Result<prometheus_http_api::Response, serde_json::Error> = serde_json::from_slice(&full_response);
+/// assert!(res_json.is_ok());
+/// ```
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
-pub struct PrometheusResponse {
-    pub data: PrometheusResponseData,
+pub struct Response {
+    /// A Data response, it may be vector, matrix, scalar or String
+    pub data: ResponseData,
+    /// An status string, either `"success"` or `"error"`
     pub status: String,
 }
 
+/// An instant query to send to Prometheus
 #[derive(Debug)]
-pub struct PrometheusInstantQuery {
-    /// Prometheus expression query string.
+pub struct InstantQuery {
+    ///  expression query string.
     query: String,
     /// Evaluation timestamp. Optional.
     time: Option<u64>,
@@ -87,11 +174,11 @@ pub struct PrometheusInstantQuery {
     timeout: Option<u64>,
 }
 
-impl PrometheusInstantQuery {
+impl InstantQuery {
     /// Initializes an Instant query with optional fields set to None
-    pub fn new(query: String) -> Self {
+    pub fn new(query: &str) -> Self {
         Self {
-            query,
+            query: query.to_string(),
             time: None,
             timeout: None,
         }
@@ -112,13 +199,10 @@ impl PrometheusInstantQuery {
     /// Transforms the typed query into HTTP GET query params, it contains a pre-built `base` that
     /// may use an HTTP path  prefix if configured.
     pub fn as_query_params(&self, mut base: String) -> String {
-        tracing::trace!(
-            "PrometheusInstantQuery::as_query_params raw query: {}",
-            self.query
-        );
+        tracing::trace!("InstantQuery::as_query_params raw query: {}", self.query);
         let encoded_query = utf8_percent_encode(&self.query, NON_ALPHANUMERIC).to_string();
         tracing::trace!(
-            "PrometheusInstantQuery::as_query_params encoded_query: {}",
+            "InstantQuery::as_query_params encoded_query: {}",
             encoded_query
         );
         base.push_str(&format!("api/v1/query?query={}", encoded_query));
@@ -132,9 +216,10 @@ impl PrometheusInstantQuery {
     }
 }
 
+/// A range query to send to Prometheus
 #[derive(Debug)]
-pub struct PrometheusRangeQuery {
-    /// Prometheus expression query string.
+pub struct RangeQuery {
+    ///  expression query string.
     pub query: String,
     /// Start timestamp, inclusive.
     pub start: u64,
@@ -146,11 +231,11 @@ pub struct PrometheusRangeQuery {
     pub timeout: Option<u64>,
 }
 
-impl PrometheusRangeQuery {
+impl RangeQuery {
     /// Initializes a Range query with optional fields set to None
-    pub fn new(query: String, start: u64, end: u64, step: f64) -> Self {
+    pub fn new(query: &str, start: u64, end: u64, step: f64) -> Self {
         Self {
-            query,
+            query: query.to_string(),
             start,
             end,
             step,
@@ -167,13 +252,10 @@ impl PrometheusRangeQuery {
     /// Transforms the typed query into HTTP GET query params, it contains a pre-built `base` that
     /// may use an HTTP path  prefix if configured.
     pub fn as_query_params(&self, mut base: String) -> String {
-        tracing::trace!(
-            "PrometheusRangeQuery::as_query_params: raw query: {}",
-            self.query
-        );
+        tracing::trace!("RangeQuery::as_query_params: raw query: {}", self.query);
         let encoded_query = utf8_percent_encode(&self.query, NON_ALPHANUMERIC).to_string();
         tracing::trace!(
-            "PrometheusRangeQuery::as_query_params encoded_query: {}",
+            "RangeQuery::as_query_params encoded_query: {}",
             encoded_query
         );
         base.push_str(&format!(
@@ -187,25 +269,16 @@ impl PrometheusRangeQuery {
     }
 }
 
+/// A query to the Prometheus HTTP API
 #[derive(Debug)]
-pub enum PrometheusQuery {
-    /// Evaluates an instant query at a single point in time
-    Instant(PrometheusInstantQuery),
-    /// Evaluates an expression query over a range of time
-    Range(PrometheusRangeQuery),
+pub enum Query {
+    /// Represents an instant query at a single point in time
+    Instant(InstantQuery),
+    /// Represents an expression query over a range of time
+    Range(RangeQuery),
 }
 
-impl PrometheusQuery {
-    ///  Builds a query of type `Self::Instant`
-    pub fn instant(query: PrometheusInstantQuery) -> Self {
-        PrometheusQuery::Instant(query)
-    }
-
-    ///  Builds a query of type `Self::Range`
-    pub fn range(query: PrometheusRangeQuery) -> Self {
-        PrometheusQuery::Range(query)
-    }
-
+impl Query {
     /// Transforms the typed query into HTTP GET query params
     pub fn as_query_params(&self, prefix: Option<String>) -> String {
         let mut base = if let Some(prefix) = prefix {
@@ -231,21 +304,28 @@ impl PrometheusQuery {
     }
 }
 
+/// A simple Error type to understand different errors.
 #[derive(Error, Debug)]
-pub enum PrometheusDataSourceError {
+pub enum DataSourceError {
+    /// The DataSource request may fail due to an http module request, could happen while
+    /// interacting with the HTTP server.
     #[error("http error: {0}")]
     Http(#[from] http::Error),
+    /// The DataSource request building may fail due to invalid schemes, authority, etc.
     #[error("hyper error: {0}")]
     Hyper(#[from] hyper::Error),
+    /// The DataSource request may fail due to invalid data returned from the server.
     #[error("Serde Error: {0}")]
     Serde(#[from] serde_json::Error),
+    /// The DataSource building process may not specific a query, this is a required field.
     #[error("Missing query type")]
     MissingQueryParam,
 }
 
-/// Represents a prometheus data source
+/// Represents a prometheus data source that works over an http(s) host:port endpoint potentially
+/// behind a /prometheus_prefix/
 #[derive(Debug)]
-pub struct PrometheusDataSource {
+pub struct DataSource {
     /// This should contain the scheme://<authority>/ portion of the URL, the params would be
     /// appended later.
     pub authority: String,
@@ -258,14 +338,15 @@ pub struct PrometheusDataSource {
     pub prefix: Option<String>,
 
     /// The query to send to prometheus
-    pub query: PrometheusQuery,
+    pub query: Query,
 
     /// Sets the timeout for the HTTP connection to the prometheus server
     pub http_timeout: Option<Duration>,
 }
 
+/// A Builder struct to create the [`DataSource`]
 #[derive(Debug)]
-pub struct PrometheusDataSourceBuilder {
+pub struct DataSourceBuilder {
     /// Allows setting the http://<authority>/ portion of the URL, the query param may be a
     /// host:port or user:password@host:port or dns/fqdn
     pub authority: String,
@@ -280,16 +361,18 @@ pub struct PrometheusDataSourceBuilder {
     pub prefix: Option<String>,
 
     /// Sets the query parameter
-    pub query: Option<PrometheusQuery>,
+    pub query: Option<Query>,
 
     /// Sets the timeout for the HTTP connection to the prometheus server
     pub http_timeout: Option<Duration>,
 }
 
-impl PrometheusDataSourceBuilder {
-    pub fn new(authority: String) -> Self {
+impl DataSourceBuilder {
+    /// Initializes the builder for the DataSource, required param is the authority, may contain
+    /// `user:password@host:port`, or `host:port`
+    pub fn new(authority: &str) -> Self {
         Self {
-            authority,
+            authority: authority.to_string(),
             scheme: None,
             prefix: None,
             query: None,
@@ -305,7 +388,7 @@ impl PrometheusDataSourceBuilder {
     }
 
     /// Sets the prometheus query param.
-    pub fn with_query(mut self, query: PrometheusQuery) -> Self {
+    pub fn with_query(mut self, query: Query) -> Self {
         self.query = Some(query);
         self
     }
@@ -316,13 +399,13 @@ impl PrometheusDataSourceBuilder {
         self
     }
 
-    /// Builds into PrometheusDataSource after checking and merging fields
-    pub fn build(self) -> Result<PrometheusDataSource, PrometheusDataSourceError> {
+    /// Builds into DataSource after checking and merging fields
+    pub fn build(self) -> Result<DataSource, DataSourceError> {
         let query = match self.query {
             Some(query) => query,
             None => {
                 tracing::error!("Missing query field in builder");
-                return Err(PrometheusDataSourceError::MissingQueryParam);
+                return Err(DataSourceError::MissingQueryParam);
             }
         };
         if let Some(http_timeout) = self.http_timeout {
@@ -336,7 +419,7 @@ impl PrometheusDataSourceBuilder {
             Some(val) => val,
             None => String::from("http"),
         };
-        Ok(PrometheusDataSource {
+        Ok(DataSource {
             authority: self.authority,
             scheme,
             prefix: self.prefix,
@@ -346,9 +429,9 @@ impl PrometheusDataSourceBuilder {
     }
 }
 
-impl PrometheusDataSource {
-    /// `get` is an async operation that returns potentially a PrometheusResponse
-    pub async fn get(&self) -> Result<PrometheusResponse, PrometheusDataSourceError> {
+impl DataSource {
+    /// `get` is an async operation that returns potentially a Response
+    pub async fn get(&self) -> Result<Response, DataSourceError> {
         let url = http::uri::Builder::new()
             .authority(self.authority.clone())
             .scheme(self.scheme.as_str())
@@ -401,13 +484,11 @@ mod tests {
             }
             "#,
         );
-        let res0_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test0_json);
-        assert_eq!(res0_json.is_err(), true);
+        let res0_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test0_json);
+        assert!(res0_json.is_err());
         let test1_json = hyper::body::Bytes::from("Internal Server Error");
-        let res1_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test1_json);
-        assert_eq!(res1_json.is_err(), true);
+        let res1_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test1_json);
+        assert!(res1_json.is_err());
     }
 
     #[test]
@@ -423,9 +504,8 @@ mod tests {
               }
             }"#,
         );
-        let res_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test0_json);
-        assert_eq!(res_json.is_ok(), true);
+        let res_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test0_json);
+        assert!(res_json.is_ok());
         // This json is missing the value after the epoch
         let test1_json = hyper::body::Bytes::from(
             r#"
@@ -436,9 +516,8 @@ mod tests {
               }
             }"#,
         );
-        let res_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test1_json);
-        assert_eq!(res_json.is_ok(), true);
+        let res_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test1_json);
+        assert!(res_json.is_ok());
     }
 
     #[test]
@@ -468,9 +547,8 @@ mod tests {
               }
             }"#,
         );
-        let res_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test0_json);
-        assert_eq!(res_json.is_ok(), true);
+        let res_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test0_json);
+        assert!(res_json.is_ok());
         // This json is missing the value after the epoch
         let test2_json = hyper::body::Bytes::from(
             r#"
@@ -493,9 +571,8 @@ mod tests {
               }
             }"#,
         );
-        let res_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test2_json);
-        assert_eq!(res_json.is_ok(), true);
+        let res_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test2_json);
+        assert!(res_json.is_ok());
     }
 
     #[test]
@@ -535,16 +612,15 @@ mod tests {
               }
             }"#,
         );
-        let res_json: Result<PrometheusResponse, serde_json::Error> =
-            serde_json::from_slice(&test0_json);
-        assert_eq!(res_json.is_ok(), true);
+        let res_json: Result<Response, serde_json::Error> = serde_json::from_slice(&test0_json);
+        assert!(res_json.is_ok());
     }
 
     #[tokio::test]
     #[ignore]
     async fn it_loads_prometheus() {
-        let query = PrometheusQuery::Instant(PrometheusInstantQuery::new("up".to_string()));
-        let request = PrometheusDataSourceBuilder::new("localhost:9090".to_string())
+        let query = Query::Instant(InstantQuery::new("up"));
+        let request = DataSourceBuilder::new("localhost:9090")
             .with_query(query)
             .build()
             .unwrap();

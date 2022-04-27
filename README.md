@@ -1,14 +1,14 @@
-# prometheus-http-api-rs 0.0.1
+# prometheus-http-api-rs 0.0.2
 
 A simple library to pull data from prometheus using its API
 
 [![Rust](https://github.com/sebosp/prometheus-http-api-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/sebosp/prometheus-http-api-rs/actions/workflows/rust.yml)
-[![Crates.io](https://img.shields.io/crates/v/prometheus-http-api-rs.svg)](https://crates.io/crates/prometheus-http-api-rs)
-[![Documentation](https://docs.rs/prometheus-http-api-rs/badge.svg)][dox]
+[![Crates.io](https://img.shields.io/crates/v/prometheus-http-api.svg)](https://crates.io/crates/prometheus-http-api)
+[![Documentation](https://docs.rs/prometheus-http-api/badge.svg)][dox]
 
 Upcoming docs [crate documentation][dox].
 
-[dox]: https://docs.rs/prometheus-http-api-rs
+[dox]: https://docs.rs/prometheus-http-api
 
 ## Usage
 
@@ -16,18 +16,18 @@ Add dependency in `Cargo.toml`:
 
 ```toml
 [dependencies]
-prometheus-http-api-rs = "0.0.1"
+prometheus-http-api = "0.0.2"
 ```
 
-Use `prometheus_http_api_rs`
+Use `prometheus_http_api`
 
 ```rust
-use prometheus_http_api_rs::*;
+use prometheus_http_api::*;
 
 #[tokio::main]
 async fn main() {
-    let query = PrometheusQuery::Instant(PrometheusInstantQuery::new("up".to_string()));
-    let request = PrometheusDataSourceBuilder::new("localhost:9090".to_string())
+    let query = Query::Instant(InstantQuery::new("up"));
+    let request = DataSourceBuilder::new("localhost:9090")
         .with_query(query)
         .build()
         .unwrap();
